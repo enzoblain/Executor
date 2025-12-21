@@ -18,12 +18,10 @@ mod context;
 mod executor;
 mod queue;
 mod runtime;
-mod task;
+pub mod task;
 mod timer;
 mod waker;
 
 pub use builder::RuntimeBuilder;
-pub use context::spawn;
 pub use runtime::Runtime;
-pub use task::Task;
 pub use timer::sleep;

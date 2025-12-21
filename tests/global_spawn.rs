@@ -1,4 +1,4 @@
-use r#async::{Runtime, spawn};
+use r#async::{Runtime, task::Task};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -8,7 +8,7 @@ fn test_global_spawn_basic() {
     let completed_clone = completed.clone();
 
     rt.block_on(async move {
-        spawn(async move {
+        Task::spawn(async move {
             *completed_clone.lock().unwrap() = true;
         });
     });
@@ -29,15 +29,15 @@ fn test_global_spawn_multiple() {
     let c3 = counter.clone();
 
     rt.block_on(async move {
-        spawn(async move {
+        Task::spawn(async move {
             *c1.lock().unwrap() += 1;
         });
 
-        spawn(async move {
+        Task::spawn(async move {
             *c2.lock().unwrap() += 10;
         });
 
-        spawn(async move {
+        Task::spawn(async move {
             *c3.lock().unwrap() += 100;
         });
     });
@@ -62,15 +62,15 @@ fn test_global_spawn_nested() {
     rt.block_on(async move {
         v0.lock().unwrap().push(1);
 
-        spawn(async move {
+        Task::spawn(async move {
             v1.lock().unwrap().push(2);
 
-            spawn(async move {
+            Task::spawn(async move {
                 v2.lock().unwrap().push(3);
             });
         });
 
-        spawn(async move {
+        Task::spawn(async move {
             v3.lock().unwrap().push(4);
         });
     });
@@ -90,11 +90,11 @@ fn test_global_spawn_from_spawned_task() {
 
     rt.block_on(async move {
         // Spawn a task that itself spawns another task
-        spawn(async move {
+        Task::spawn(async move {
             *c1.lock().unwrap() += 1;
 
             // Spawn from within a spawned task
-            spawn(async move {
+            Task::spawn(async move {
                 *c2.lock().unwrap() += 10;
             });
         });
@@ -104,10 +104,10 @@ fn test_global_spawn_from_spawned_task() {
 }
 
 #[test]
-#[should_panic(expected = "spawn() called outside of a runtime context")]
+#[should_panic(expected = "Task::spawn() called outside of a runtime context")]
 fn test_global_spawn_panics_outside_runtime() {
     // Calling spawn outside of a runtime context should panic
-    spawn(async {
+    Task::spawn(async {
         println!("This should never run");
     });
 }
@@ -121,12 +121,12 @@ fn test_global_spawn_with_return_values() {
     let r2 = results.clone();
 
     rt.block_on(async move {
-        spawn(async move {
+        Task::spawn(async move {
             let value = compute_value(5);
             r1.lock().unwrap().push(value);
         });
 
-        spawn(async move {
+        Task::spawn(async move {
             let value = compute_value(10);
             r2.lock().unwrap().push(value);
         });
@@ -164,11 +164,11 @@ async fn do_work_with_spawn(counter: Arc<Mutex<i32>>) {
     let c2 = counter.clone();
 
     // spawn devrait fonctionner ici car on est dans le contexte de block_on
-    spawn(async move {
+    Task::spawn(async move {
         *c1.lock().unwrap() += 10;
     });
 
-    spawn(async move {
+    Task::spawn(async move {
         *c2.lock().unwrap() += 32;
     });
 }
@@ -197,7 +197,7 @@ async fn nested_function_a(values: Arc<Mutex<Vec<i32>>>) {
     let v1 = values.clone();
     let v2 = values.clone();
 
-    spawn(async move {
+    Task::spawn(async move {
         v1.lock().unwrap().push(2);
     });
 
@@ -208,11 +208,11 @@ async fn nested_function_b(values: Arc<Mutex<Vec<i32>>>) {
     let v1 = values.clone();
     let v2 = values.clone();
 
-    spawn(async move {
+    Task::spawn(async move {
         v1.lock().unwrap().push(3);
     });
 
-    spawn(async move {
+    Task::spawn(async move {
         v2.lock().unwrap().push(4);
     });
 }

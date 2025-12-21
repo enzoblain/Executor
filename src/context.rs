@@ -4,18 +4,17 @@
 //! explicitly passing a runtime reference, similar to tokio::spawn.
 
 use crate::queue::TaskQueue;
-use crate::task::Task;
 
 use std::cell::RefCell;
-use std::future::Future;
 use std::sync::Arc;
 
 thread_local! {
     /// Thread-local storage for the current runtime's task queue.
     ///
     /// When a runtime is entered via `block_on`, its task queue is stored here,
-    /// allowing `spawn()` to work without an explicit runtime reference.
-    static CURRENT_QUEUE: RefCell<Option<Arc<TaskQueue>>> = const { RefCell::new(None) };
+    /// allowing `Task::spawn()` to work without an explicit runtime reference.
+    /// This enables global task spawning similar to tokio::spawn().
+    pub(crate) static CURRENT_QUEUE: RefCell<Option<Arc<TaskQueue>>> = const { RefCell::new(None) };
 }
 
 /// Enters a runtime context with the given task queue.
@@ -39,40 +38,4 @@ where
         *current.borrow_mut() = previous;
         result
     })
-}
-
-/// Spawns a task on the current runtime context.
-///
-/// This function allows spawning tasks without holding a runtime reference,
-/// similar to `tokio::spawn()`. Must be called from within a runtime context
-/// (i.e., from within a `block_on` or spawned task).
-///
-/// # Arguments
-/// * `fut` - The future to spawn as a background task
-///
-/// # Panics
-/// Panics if called outside of a runtime context (no runtime is active on this thread).
-///
-/// # Example
-/// ```ignore
-/// use r#async::{Runtime, spawn};
-///
-/// let rt = Runtime::new();
-/// rt.block_on(async {
-///     spawn(async {
-///         println!("Spawned task");
-///     });
-/// });
-/// ```
-pub fn spawn<F: Future<Output = ()> + Send + 'static>(fut: F) {
-    CURRENT_QUEUE.with(|current| {
-        let queue = current
-            .borrow()
-            .as_ref()
-            .expect("spawn() called outside of a runtime context")
-            .clone();
-
-        let task = Task::new(fut, queue.clone());
-        queue.push(task);
-    });
 }

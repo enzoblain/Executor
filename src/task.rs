@@ -1,9 +1,10 @@
 //! Task wrapper that combines futures with waker integration.
 //!
 //! A task encapsulates a future and provides mechanisms for polling and awakening
-//! when the future is ready to make progress.
+//! when the future is ready to make progress. Supports both direct task execution via
+//! the runtime and global task spawning without requiring an explicit runtime reference.
 
-use crate::context::enter_context;
+use crate::context::{CURRENT_QUEUE, enter_context};
 use crate::queue::TaskQueue;
 use crate::waker::make_waker;
 
@@ -66,14 +67,39 @@ impl Task {
         });
     }
 
-    /// Spawns a subtask from within this task.
+    /// Spawns a task on the current runtime context.
     ///
-    /// Creates and enqueues a new task to be executed concurrently.
+    /// This function allows spawning tasks without holding a runtime reference,
+    /// similar to `tokio::spawn()`. Must be called from within a runtime context
+    /// (i.e., from within a `block_on` or spawned task).
     ///
     /// # Arguments
-    /// * `fut` - The future to spawn as a subtask
-    pub fn spawn<F: Future<Output = ()> + Send + 'static>(&self, fut: F) {
-        let task = Task::new(fut, self.queue.clone());
-        self.queue.push(task);
+    /// * `fut` - The future to spawn as a background task
+    ///
+    /// # Panics
+    /// Panics if called outside of a runtime context (no runtime is active on this thread).
+    ///
+    /// # Example
+    /// ```ignore
+    /// use r#async::task::Task;
+    ///
+    /// let rt = r#async::Runtime::new();
+    /// rt.block_on(async {
+    ///     Task::spawn(async {
+    ///         println!("Spawned task");
+    ///     });
+    /// });
+    /// ```
+    pub fn spawn<F: Future<Output = ()> + Send + 'static>(fut: F) {
+        CURRENT_QUEUE.with(|current| {
+            let queue = current
+                .borrow()
+                .as_ref()
+                .expect("Task::spawn() called outside of a runtime context")
+                .clone();
+
+            let task = Task::new(fut, queue.clone());
+            queue.push(task);
+        });
     }
 }

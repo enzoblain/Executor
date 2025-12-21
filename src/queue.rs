@@ -28,8 +28,8 @@ impl TaskQueue {
 
     /// Enqueues a task to be executed.
     ///
-    /// Adds the task to the back of the queue. The task will be executed by the
-    /// executor in FIFO order.
+    /// Pushes the task to the back of the queue using FIFO (first-in-first-out) ordering.
+    /// The task will be executed by the executor in the order it was added.
     ///
     /// # Arguments
     /// * `task` - The task to enqueue
