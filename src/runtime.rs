@@ -3,6 +3,7 @@
 //! The runtime coordinates the execution of a main future via `block_on` and handles
 //! spawned background tasks. It uses a task queue and executor to manage concurrent execution.
 
+use crate::context::enter_context;
 use crate::executor::Executor;
 use crate::queue::TaskQueue;
 use crate::task::Task;
@@ -61,6 +62,9 @@ impl Runtime {
     /// Runs the provided future to completion, executing any spawned tasks from the queue
     /// when the main future is pending. Returns the output of the completed future.
     ///
+    /// This method also establishes a runtime context, allowing tasks spawned within
+    /// the future to use the global `spawn()` function without an explicit runtime reference.
+    ///
     /// # Arguments
     /// * `fut` - The future to execute and wait for completion
     ///
@@ -73,22 +77,24 @@ impl Runtime {
     /// assert_eq!(result, 42);
     /// ```
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
-        let mut fut = Box::pin(fut);
+        enter_context(self.queue.clone(), || {
+            let mut fut = Box::pin(fut);
 
-        let w = noop_waker();
-        let mut cx = Context::from_waker(&w);
+            let w = noop_waker();
+            let mut cx = Context::from_waker(&w);
 
-        loop {
-            match fut.as_mut().poll(&mut cx) {
-                Poll::Ready(val) => {
-                    self.executor.run();
-                    return val;
-                }
-                Poll::Pending => {
-                    self.executor.run();
+            loop {
+                match fut.as_mut().poll(&mut cx) {
+                    Poll::Ready(val) => {
+                        self.executor.run();
+                        return val;
+                    }
+                    Poll::Pending => {
+                        self.executor.run();
+                    }
                 }
             }
-        }
+        })
     }
 }
 

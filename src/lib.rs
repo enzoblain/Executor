@@ -13,6 +13,7 @@
 //! - **RuntimeBuilder**: Fluent builder pattern for runtime instantiation
 
 mod builder;
+mod context;
 mod executor;
 mod queue;
 mod runtime;
@@ -20,5 +21,6 @@ mod task;
 mod waker;
 
 pub use builder::RuntimeBuilder;
+pub use context::spawn;
 pub use runtime::Runtime;
 pub use task::Task;

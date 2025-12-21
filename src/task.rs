@@ -3,6 +3,7 @@
 //! A task encapsulates a future and provides mechanisms for polling and awakening
 //! when the future is ready to make progress.
 
+use crate::context::enter_context;
 use crate::queue::TaskQueue;
 use crate::waker::make_waker;
 
@@ -47,17 +48,22 @@ impl Task {
     /// Attempts to make progress on the wrapped future. If the future returns Pending,
     /// it is stored back for later polling. If it returns Ready, the task is complete.
     /// Uses a custom waker to enable task re-scheduling.
+    ///
+    /// This method also establishes the runtime context, allowing spawned tasks to use
+    /// the global `spawn()` function.
     pub fn poll(self: &Arc<Self>) {
-        let w = make_waker(self.clone());
-        let mut cx = Context::from_waker(&w);
+        enter_context(self.queue.clone(), || {
+            let w = make_waker(self.clone());
+            let mut cx = Context::from_waker(&w);
 
-        let mut slot = self.future.lock().unwrap();
+            let mut slot = self.future.lock().unwrap();
 
-        if let Some(mut fut) = slot.take()
-            && fut.as_mut().poll(&mut cx).is_pending()
-        {
-            *slot = Some(fut);
-        }
+            if let Some(mut fut) = slot.take()
+                && fut.as_mut().poll(&mut cx).is_pending()
+            {
+                *slot = Some(fut);
+            }
+        });
     }
 
     /// Spawns a subtask from within this task.
