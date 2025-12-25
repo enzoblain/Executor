@@ -6,12 +6,32 @@ use libc::{
     EAGAIN, EVFILT_READ, EVFILT_TIMER, EVFILT_WRITE, EWOULDBLOCK, close, kqueue, read, write,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::task::Waker;
 
 pub(crate) enum Entry {
     #[allow(unused)]
     Listener,
     Client(Connexion),
+    /// A future waiting for I/O events
+    Future(FutureEntry),
     // Timer,
+}
+
+/// Represents a future waiting for I/O readiness
+pub(crate) struct FutureEntry {
+    /// Waker to notify when the I/O event is ready
+    pub(crate) waker: Waker,
+    /// Type of I/O event being waited for
+    pub(crate) interest: Interest,
+}
+
+/// Type of I/O event interest
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Interest {
+    Read,
+    Write,
+    ReadWrite,
 }
 
 pub(crate) struct Reactor {
@@ -19,6 +39,8 @@ pub(crate) struct Reactor {
     events: [Event; 64],
     n_events: i32,
     registry: HashMap<i32, Entry>,
+    /// Pending wakers to be notified
+    pending_wakers: Vec<Waker>,
 }
 
 const OUT_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -30,7 +52,58 @@ impl Reactor {
             events: [Event::EMPTY; 64],
             n_events: 0,
             registry: HashMap::new(),
+            pending_wakers: Vec::new(),
         }
+    }
+
+    /// Register a future to be woken when I/O is ready
+    pub(crate) fn register_future(
+        &mut self,
+        file_descriptor: i32,
+        waker: Waker,
+        interest: Interest,
+    ) {
+        // Register appropriate kqueue events based on interest
+        match interest {
+            Interest::Read => {
+                let event = Event::new(file_descriptor as usize, EVFILT_READ, None);
+                event.register(self.queue);
+            }
+            Interest::Write => {
+                let event = Event::new(file_descriptor as usize, EVFILT_WRITE, None);
+                event.register(self.queue);
+            }
+            Interest::ReadWrite => {
+                let event_read = Event::new(file_descriptor as usize, EVFILT_READ, None);
+                let event_write = Event::new(file_descriptor as usize, EVFILT_WRITE, None);
+                event_read.register(self.queue);
+                event_write.register(self.queue);
+            }
+        }
+
+        // Store the future entry
+        self.registry.insert(
+            file_descriptor,
+            Entry::Future(FutureEntry { waker, interest }),
+        );
+    }
+
+    /// Unregister a future from I/O notifications
+    pub(crate) fn unregister_future(&mut self, file_descriptor: i32, interest: Interest) {
+        match interest {
+            Interest::Read => {
+                Event::unregister(self.queue, file_descriptor as usize, EVFILT_READ);
+            }
+            Interest::Write => {
+                Event::unregister(self.queue, file_descriptor as usize, EVFILT_WRITE);
+            }
+            Interest::ReadWrite => {
+                Event::unregister(self.queue, file_descriptor as usize, EVFILT_READ);
+                Event::unregister(self.queue, file_descriptor as usize, EVFILT_WRITE);
+            }
+        }
+
+        self.registry.remove(&file_descriptor);
     }
 
     // fn register_event(&self, file_descriptor: usize, filter: i16) {
@@ -56,6 +129,13 @@ impl Reactor {
         self.n_events = n_events;
     }
 
+    /// Wake all pending futures and clear the list
+    pub(crate) fn wake_pending(&mut self) {
+        for waker in self.pending_wakers.drain(..) {
+            waker.wake();
+        }
+    }
+
     pub(crate) fn handle_events(&mut self) {
         for event in self.events.iter().take(self.n_events as usize) {
             let file_descriptor = event.get_ident() as i32;
@@ -73,18 +153,27 @@ impl Reactor {
                         None => continue,
                     };
 
-                    let close = match &mut entry {
-                        Entry::Client(conn) if matches!(conn.state, ConnexionState::Reading) => {
-                            self.handle_read(file_descriptor, conn)
+                    match &mut entry {
+                        Entry::Future(future_entry) => {
+                            // Wake the future waiting for read readiness
+                            self.pending_wakers.push(future_entry.waker.clone());
+                            // Don't re-insert, the future will re-register if needed
+                            continue;
                         }
-                        Entry::Client(_) => false,
-                        _ => true,
-                    };
-
-                    if close {
-                        self.cleanup(file_descriptor);
-                    } else {
-                        self.registry.insert(file_descriptor, entry);
+                        Entry::Client(conn) if matches!(conn.state, ConnexionState::Reading) => {
+                            let close = self.handle_read(file_descriptor, conn);
+                            if close {
+                                self.cleanup(file_descriptor);
+                            } else {
+                                self.registry.insert(file_descriptor, entry);
+                            }
+                        }
+                        Entry::Client(_) => {
+                            self.registry.insert(file_descriptor, entry);
+                        }
+                        _ => {
+                            self.cleanup(file_descriptor);
+                        }
                     }
                 }
                 EVFILT_WRITE => {
@@ -93,18 +182,27 @@ impl Reactor {
                         None => continue,
                     };
 
-                    let close = match &mut entry {
-                        Entry::Client(conn) if matches!(conn.state, ConnexionState::Writing) => {
-                            self.handle_write(file_descriptor, conn)
+                    match &mut entry {
+                        Entry::Future(future_entry) => {
+                            // Wake the future waiting for write readiness
+                            self.pending_wakers.push(future_entry.waker.clone());
+                            // Don't re-insert, the future will re-register if needed
+                            continue;
                         }
-                        Entry::Client(_) => false,
-                        _ => true,
-                    };
-
-                    if close {
-                        self.cleanup(file_descriptor);
-                    } else {
-                        self.registry.insert(file_descriptor, entry);
+                        Entry::Client(conn) if matches!(conn.state, ConnexionState::Writing) => {
+                            let close = self.handle_write(file_descriptor, conn);
+                            if close {
+                                self.cleanup(file_descriptor);
+                            } else {
+                                self.registry.insert(file_descriptor, entry);
+                            }
+                        }
+                        Entry::Client(_) => {
+                            self.registry.insert(file_descriptor, entry);
+                        }
+                        _ => {
+                            self.cleanup(file_descriptor);
+                        }
                     }
                 }
                 EVFILT_TIMER => {
