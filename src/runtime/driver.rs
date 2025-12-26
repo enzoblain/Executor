@@ -11,12 +11,13 @@
 //! and I/O events. This ensures that spawned tasks and network operations make progress
 //! even if the main future blocks on synchronous operations.
 
-use crate::reactor::core::{Reactor, set_current_reactor};
+use crate::reactor::core::{Reactor, ReactorHandle};
 use crate::runtime::{Executor, TaskQueue, enter_context};
 
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread;
 
 static STARTED_QUEUES: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
 
@@ -30,7 +31,7 @@ static STARTED_QUEUES: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
 ///
 /// This allows spawned tasks to make progress even if the main future blocks.
 pub(crate) struct BackgroundDriver {
-    reactor: Reactor,
+    reactor: ReactorHandle,
     executor: Executor,
     queue: Arc<TaskQueue>,
 }
@@ -38,7 +39,7 @@ pub(crate) struct BackgroundDriver {
 impl BackgroundDriver {
     /// Creates a new background driver for the given queue.
     fn new(queue: Arc<TaskQueue>) -> Self {
-        let reactor = Reactor::new();
+        let reactor = Rc::new(RefCell::new(Reactor::new()));
         let executor = Executor::new(queue.clone());
 
         Self {
@@ -53,8 +54,6 @@ impl BackgroundDriver {
     /// This method is meant to run in a dedicated thread and will block indefinitely
     /// until [`TaskQueue::shutdown`] is called.
     fn run(&mut self) {
-        set_current_reactor(&mut self.reactor);
-
         enter_context(self.queue.clone(), || {
             loop {
                 if self.queue.is_shutdown() {
@@ -65,8 +64,8 @@ impl BackgroundDriver {
                 self.executor.run();
 
                 // Poll for I/O events without blocking
-                self.reactor.poll_events();
-                self.reactor.wake_ready();
+                self.reactor.borrow_mut().poll_events();
+                self.reactor.borrow_mut().wake_ready();
 
                 // If more tasks are ready, continue immediately
                 if !self.queue.is_empty() {
@@ -79,9 +78,9 @@ impl BackgroundDriver {
                 }
 
                 // Block on I/O with timeout to periodically check shutdown
-                self.reactor.wait_for_event_with_timeout(100);
-                self.reactor.handle_events();
-                self.reactor.wake_ready();
+                self.reactor.borrow_mut().wait_for_event_with_timeout(100);
+                self.reactor.borrow_mut().handle_events();
+                self.reactor.borrow_mut().wake_ready();
             }
         });
     }
@@ -97,21 +96,10 @@ impl BackgroundDriver {
     /// # Thread Safety
     /// Uses a static HashSet to track which queues already have drivers, preventing
     /// duplicate driver threads for the same queue.
+    #[allow(unused_variables)]
     pub(crate) fn ensure_spawned(queue: Arc<TaskQueue>) {
-        let set = STARTED_QUEUES.get_or_init(|| Mutex::new(HashSet::new()));
-        let key = Arc::as_ptr(&queue) as usize;
-
-        {
-            let mut started = set.lock().unwrap();
-            if started.contains(&key) {
-                return;
-            }
-            started.insert(key);
-        }
-
-        thread::spawn(move || {
-            let mut driver = Self::new(queue);
-            driver.run();
-        });
+        // NOTE: BackgroundDriver is currently disabled because ReactorHandle uses Rc<RefCell<>>
+        // which is not Send. To enable multi-threading, we would need to use Arc<Mutex<>> instead.
+        // For now, everything runs on the main runtime thread.
     }
 }

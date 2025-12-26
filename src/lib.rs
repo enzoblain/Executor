@@ -187,15 +187,14 @@
 //! ```
 
 mod builder;
-
-pub mod net;
-
 mod reactor;
 mod runtime;
 mod task;
 
+pub mod net;
+
 pub use builder::RuntimeBuilder;
-pub use reactor::future::{AsyncRead, AsyncWrite};
+pub use reactor::core::ReactorHandle;
 pub use reactor::sleep::sleep;
 pub use runtime::Runtime;
 pub use runtime::yield_now::yield_now;

@@ -61,13 +61,13 @@
 //! 5. When an I/O event or timer fires, the waker re-queues the task
 //! 6. The task is polled again and can make progress
 
-use crate::runtime::driver::BackgroundDriver;
-use crate::runtime::{CURRENT_QUEUE, TaskQueue, enter_context, make_waker};
+use crate::runtime::{CURRENT_QUEUE, TaskQueue, make_waker};
 
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 /// A spawned task that wraps a future.
@@ -83,8 +83,8 @@ use std::task::{Context, Poll, Waker};
 /// - `completed`: Atomic flag indicating task completion
 /// - `waiters`: Wakers waiting for this task to complete
 pub struct Task {
-    future: Mutex<Option<Pin<Box<dyn Future<Output = ()> + Send>>>>,
-    pub(crate) queue: Arc<TaskQueue>,
+    future: Mutex<Option<Pin<Box<dyn Future<Output = ()>>>>>,
+    pub(crate) queue: Rc<TaskQueue>,
     completed: AtomicBool,
     waiters: Mutex<Vec<Waker>>,
 }
@@ -106,11 +106,8 @@ impl Task {
     /// ```ignore
     /// let queue = Arc::new(TaskQueue::new());\n    /// let task = Task::new(async { println!(\"Hello\"); }, queue);
     /// ```
-    pub(crate) fn new(
-        fut: impl Future<Output = ()> + Send + 'static,
-        queue: Arc<TaskQueue>,
-    ) -> Arc<Self> {
-        Arc::new(Task {
+    pub(crate) fn new(fut: impl Future<Output = ()> + 'static, queue: Rc<TaskQueue>) -> Rc<Self> {
+        Rc::new(Task {
             future: Mutex::new(Some(Box::pin(fut))),
             queue,
             completed: AtomicBool::new(false),
@@ -127,34 +124,29 @@ impl Task {
     /// Uses a custom waker to enable task re-scheduling when the underlying future
     /// is ready to make progress.
     ///
-    /// This method also establishes the runtime context, allowing spawned tasks to use
-    /// the global `spawn()` function without an explicit runtime reference.
-    ///
     /// # Panics
     /// Does not panic; errors in the future itself are caught by the future's own logic.
-    pub fn poll(self: &Arc<Self>) {
-        enter_context(self.queue.clone(), || {
-            let w = make_waker(self.clone());
-            let mut cx = Context::from_waker(&w);
+    pub fn poll(self: &Rc<Self>) {
+        let w = make_waker(self.clone());
+        let mut cx = Context::from_waker(&w);
 
-            let mut slot = self.future.lock().unwrap();
+        let mut slot = self.future.lock().unwrap();
 
-            if let Some(mut fut) = slot.take() {
-                match fut.as_mut().poll(&mut cx) {
-                    Poll::Pending => {
-                        *slot = Some(fut);
-                    }
-                    Poll::Ready(()) => {
-                        self.completed.store(true, Ordering::SeqCst);
+        if let Some(mut fut) = slot.take() {
+            match fut.as_mut().poll(&mut cx) {
+                Poll::Pending => {
+                    *slot = Some(fut);
+                }
+                Poll::Ready(()) => {
+                    self.completed.store(true, Ordering::SeqCst);
 
-                        let mut ws = self.waiters.lock().unwrap();
-                        for w in ws.drain(..) {
-                            w.wake();
-                        }
+                    let mut ws = self.waiters.lock().unwrap();
+                    for w in ws.drain(..) {
+                        w.wake();
                     }
                 }
             }
-        });
+        }
     }
 
     /// Spawns a task on the current runtime context and returns a JoinHandle.
@@ -185,15 +177,13 @@ impl Task {
     ///     handle.await; // Wait for the task to complete
     /// }
     /// ```
-    pub fn spawn<F: Future<Output = ()> + Send + 'static>(fut: F) -> JoinHandle {
+    pub fn spawn<F: Future<Output = ()> + 'static>(fut: F) -> JoinHandle {
         CURRENT_QUEUE.with(|current| {
             let queue = current
                 .borrow()
                 .as_ref()
                 .expect("Task::spawn() called outside of a runtime context")
                 .clone();
-
-            BackgroundDriver::ensure_spawned(queue.clone());
 
             let task = Task::new(fut, queue.clone());
             queue.push(task.clone());
@@ -214,7 +204,7 @@ impl Task {
 /// handle.await; // Waits for the task to complete
 /// ```
 pub struct JoinHandle {
-    task: Arc<Task>,
+    task: Rc<Task>,
 }
 
 impl Future for JoinHandle {

@@ -52,6 +52,7 @@ impl Event {
         event.register(queue);
     }
 
+    /// Blocks until events are available and writes them into `events`, returning the count.
     pub(crate) fn wait(queue: i32, events: &mut [Event; 64]) -> i32 {
         unsafe {
             kevent(
@@ -61,25 +62,6 @@ impl Event {
                 events.as_mut_ptr() as *mut kevent,
                 events.len() as i32,
                 ptr::null(),
-            )
-        }
-    }
-
-    /// Wait with a timeout (in milliseconds).
-    pub(crate) fn wait_with_timeout(queue: i32, events: &mut [Event; 64], timeout_ms: u64) -> i32 {
-        let ts = libc::timespec {
-            tv_sec: (timeout_ms / 1000) as i64,
-            tv_nsec: ((timeout_ms % 1000) * 1_000_000) as i64,
-        };
-
-        unsafe {
-            kevent(
-                queue,
-                ptr::null(),
-                0,
-                events.as_mut_ptr() as *mut kevent,
-                events.len() as i32,
-                &ts as *const libc::timespec,
             )
         }
     }

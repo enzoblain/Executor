@@ -30,12 +30,13 @@
 //!
 //! [`Task::spawn`]: crate::task::Task::spawn
 
-use crate::reactor::core::{Reactor, set_current_reactor};
+use crate::reactor::core::{Reactor, ReactorHandle};
 use crate::runtime::{Executor, TaskQueue, enter_context};
 use crate::task::Task;
 
+use std::cell::RefCell;
 use std::future::Future;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 
 /// Main async runtime for executing futures.
@@ -43,9 +44,9 @@ use std::task::{Context, Poll};
 /// Provides the core API for running futures to completion and spawning background tasks.
 /// The runtime maintains an executor and task queue for managing concurrent task execution.
 pub struct Runtime {
-    queue: Arc<TaskQueue>,
+    queue: Rc<TaskQueue>,
     executor: Executor,
-    reactor: Reactor,
+    reactor: ReactorHandle,
 }
 
 impl Runtime {
@@ -59,9 +60,9 @@ impl Runtime {
     /// let rt = Runtime::new();
     /// ```
     pub fn new() -> Self {
-        let queue = Arc::new(TaskQueue::new());
+        let queue = Rc::new(TaskQueue::new());
         let executor = Executor::new(queue.clone());
-        let reactor = Reactor::new();
+        let reactor = Rc::new(RefCell::new(Reactor::new()));
 
         Self {
             queue,
@@ -84,7 +85,7 @@ impl Runtime {
     ///     println!("Background task");
     /// });
     /// ```
-    pub fn spawn<F: Future<Output = ()> + Send + 'static>(&self, fut: F) {
+    pub fn spawn<F: Future<Output = ()> + 'static>(&self, fut: F) {
         let task = Task::new(fut, self.queue.clone());
         self.queue.push(task);
     }
@@ -109,9 +110,7 @@ impl Runtime {
     /// assert_eq!(result, 42);
     /// ```
     pub fn block_on<F: Future>(&mut self, fut: F) -> F::Output {
-        set_current_reactor(&mut self.reactor);
-
-        enter_context(self.queue.clone(), || {
+        enter_context(self.queue.clone(), self.reactor.clone(), || {
             let mut fut = Box::pin(fut);
 
             let mut notified = false;
@@ -143,8 +142,6 @@ impl Runtime {
 
             loop {
                 if let Poll::Ready(val) = fut.as_mut().poll(&mut cx) {
-                    self.queue.shutdown();
-
                     for _ in 0..10 {
                         self.executor.run();
                         if self.queue.is_empty() {
@@ -158,8 +155,8 @@ impl Runtime {
 
                 self.executor.run();
 
-                self.reactor.poll_events();
-                self.reactor.wake_ready();
+                self.reactor.borrow_mut().poll_events();
+                self.reactor.borrow_mut().wake_ready();
 
                 if notified {
                     notified = false;
@@ -170,11 +167,18 @@ impl Runtime {
                     continue;
                 }
 
-                self.reactor.wait_for_event();
-                self.reactor.handle_events();
-                self.reactor.wake_ready();
+                self.reactor.borrow_mut().wait_for_event();
+                self.reactor.borrow_mut().handle_events();
+                self.reactor.borrow_mut().wake_ready();
             }
         })
+    }
+
+    /// Returns a handle to the reactor for use by futures.
+    ///
+    /// This allows futures to register I/O and timer events with the reactor.
+    pub fn reactor_handle(&self) -> ReactorHandle {
+        self.reactor.clone()
     }
 }
 

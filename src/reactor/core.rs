@@ -7,47 +7,17 @@ use libc::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ptr;
+use std::rc::Rc;
 use std::task::Waker;
 use std::time::Duration;
 
-thread_local! {
-    /// Thread-local pointer to the current Runtime's reactor.
-    ///
-    /// This allows futures to access the reactor for registering I/O and timer events
-    /// without requiring an explicit reactor reference to be passed through the call stack.
-    /// It's set when entering a runtime context via [`set_current_reactor`] and cleared
-    /// when exiting.
-    pub(crate) static CURRENT_REACTOR_PTR: RefCell<*mut Reactor> =
-        const { RefCell::new(ptr::null_mut()) };
-}
-
-pub(crate) fn set_current_reactor(r: &mut Reactor) {
-    CURRENT_REACTOR_PTR.with(|cell| {
-        *cell.borrow_mut() = r as *mut Reactor;
-    });
-}
-
-/// Executes a closure with access to the current reactor.
+/// A shared handle to a reactor, enabling multiple futures to access the same reactor.
 ///
-/// This is the safe way to access the reactor. It returns `None` if called outside
-/// of a runtime context (when no reactor has been set).
-///
-/// # Arguments
-/// * `f` - A closure that takes a mutable reference to the reactor
-///
-/// # Returns
-/// `Some(R)` with the closure's return value if a reactor exists, `None` otherwise
-pub(crate) fn with_current_reactor<R>(f: impl FnOnce(&mut Reactor) -> R) -> Option<R> {
-    CURRENT_REACTOR_PTR.with(|cell| {
-        let ptr = *cell.borrow();
-        if ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { f(&mut *ptr) })
-        }
-    })
-}
+/// This allows futures to register I/O and timer events with the reactor.
+/// Using `Rc<RefCell<Reactor>>` enables interior mutability and shared ownership
+/// while keeping everything single-threaded, preparing for potential multi-threaded
+/// designs where this would become `Arc<Mutex<Reactor>>`.
+pub type ReactorHandle = Rc<RefCell<Reactor>>;
 
 pub(crate) enum Entry {
     #[allow(unused)]
@@ -57,7 +27,11 @@ pub(crate) enum Entry {
     // Timer,
 }
 
-pub(crate) struct Reactor {
+/// The reactor manages I/O events and timers using kqueue.
+///
+/// This is typically wrapped in a `ReactorHandle` (Rc<RefCell<Reactor>>)
+/// to allow shared access from multiple futures.
+pub struct Reactor {
     queue: i32,
     events: [Event; 64],
     n_events: i32,
@@ -113,13 +87,6 @@ impl Reactor {
 
     pub(crate) fn wait_for_event(&mut self) {
         let n_events = Event::wait(self.queue, &mut self.events);
-
-        self.n_events = n_events;
-    }
-
-    /// Wait for events with a timeout in milliseconds.
-    pub(crate) fn wait_for_event_with_timeout(&mut self, timeout_ms: u64) {
-        let n_events = Event::wait_with_timeout(self.queue, &mut self.events, timeout_ms);
 
         self.n_events = n_events;
     }

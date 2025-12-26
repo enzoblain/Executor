@@ -21,7 +21,9 @@
 use crate::net::future::AcceptFuture;
 use crate::net::tcp_stream::TcpStream;
 use crate::net::utils::sockaddr_to_socketaddr;
+use crate::reactor::core::ReactorHandle;
 use crate::reactor::event::Event;
+use crate::runtime::context::current_reactor;
 
 use libc::{AF_INET, SOCK_STREAM, bind, close, getsockname, listen, sockaddr, sockaddr_in, socket};
 use std::io;
@@ -49,6 +51,7 @@ use std::net::SocketAddr;
 /// ```
 pub struct TcpListener {
     file_descriptor: i32,
+    reactor: ReactorHandle,
 }
 
 impl TcpListener {
@@ -71,6 +74,22 @@ impl TcpListener {
     /// let listener = TcpListener::bind("0.0.0.0:8080").await?;
     /// ```
     pub async fn bind(address: &str) -> io::Result<Self> {
+        Self::bind_with_reactor(address, current_reactor()).await
+    }
+
+    /// Binds a listener to the given address with a specific reactor handle.
+    ///
+    /// This is the explicit version of [`bind`](Self::bind) that allows passing
+    /// a specific reactor. Most users should use [`bind`](Self::bind) instead,
+    /// which automatically uses the current runtime's reactor.
+    ///
+    /// # Arguments
+    /// * `address` - Address to bind to, format: \"ip:port\" (e.g., \"127.0.0.1:8080\")
+    /// * `reactor` - A handle to the reactor for managing I/O events
+    ///
+    /// # Returns
+    /// A [`TcpListener`] on success, or an I/O error
+    pub async fn bind_with_reactor(address: &str, reactor: ReactorHandle) -> io::Result<Self> {
         let addr = crate::net::utils::parse_sockaddr(address)?;
         let file_descriptor = unsafe { socket(AF_INET, SOCK_STREAM, 0) };
 
@@ -93,7 +112,10 @@ impl TcpListener {
             return Err(io::Error::last_os_error());
         }
 
-        Ok(Self { file_descriptor })
+        Ok(Self {
+            file_descriptor,
+            reactor,
+        })
     }
 
     /// Accepts a new incoming connection.
@@ -114,9 +136,13 @@ impl TcpListener {
     /// println!("Accepted connection from {}", addr);
     /// ```
     pub async fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        let (file_descriptor, address) = AcceptFuture::new(self.file_descriptor).await?;
+        let (file_descriptor, address) =
+            AcceptFuture::new(self.file_descriptor, self.reactor.clone()).await?;
 
-        Ok((TcpStream::new(file_descriptor), address))
+        Ok((
+            TcpStream::new(file_descriptor, self.reactor.clone()),
+            address,
+        ))
     }
 
     /// Returns the local address this listener is bound to.

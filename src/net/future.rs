@@ -1,7 +1,7 @@
 //! Async TCP futures for accepting connections and reading/writing data.
 
 use crate::net::utils::sockaddr_to_socketaddr;
-use crate::reactor::core::with_current_reactor;
+use crate::reactor::core::ReactorHandle;
 use crate::reactor::event::Event;
 
 use libc::{EAGAIN, EWOULDBLOCK, accept, read, sockaddr, sockaddr_in, socklen_t, write};
@@ -15,13 +15,15 @@ use std::task::{Context, Poll};
 /// A future that accepts a new client connection.
 pub struct AcceptFuture {
     listen_file_descriptor: i32,
+    reactor: ReactorHandle,
     registered: bool,
 }
 
 impl AcceptFuture {
-    pub fn new(listen_file_descriptor: i32) -> Self {
+    pub fn new(listen_file_descriptor: i32, reactor: ReactorHandle) -> Self {
         Self {
             listen_file_descriptor,
+            reactor,
             registered: false,
         }
     }
@@ -53,9 +55,9 @@ impl Future for AcceptFuture {
 
         if error == EAGAIN || error == EWOULDBLOCK {
             if !self.registered {
-                let _ = with_current_reactor(|r| {
-                    r.register_read(self.listen_file_descriptor, cx.waker().clone());
-                });
+                self.reactor
+                    .borrow_mut()
+                    .register_read(self.listen_file_descriptor, cx.waker().clone());
                 self.registered = true;
             }
 
@@ -70,14 +72,16 @@ impl Future for AcceptFuture {
 pub struct ReadFuture<'a> {
     file_descriptor: i32,
     buffer: &'a mut [u8],
+    reactor: ReactorHandle,
     registered: bool,
 }
 
 impl<'a> ReadFuture<'a> {
-    pub fn new(file_descriptor: i32, buffer: &'a mut [u8]) -> Self {
+    pub fn new(file_descriptor: i32, buffer: &'a mut [u8], reactor: ReactorHandle) -> Self {
         Self {
             file_descriptor,
             buffer,
+            reactor,
             registered: false,
         }
     }
@@ -109,9 +113,9 @@ impl<'a> Future for ReadFuture<'a> {
 
         if error == EAGAIN || error == EWOULDBLOCK {
             if !this.registered {
-                let _ = with_current_reactor(|r| {
-                    r.register_read(this.file_descriptor, cx.waker().clone());
-                });
+                this.reactor
+                    .borrow_mut()
+                    .register_read(this.file_descriptor, cx.waker().clone());
                 this.registered = true;
             }
 
@@ -126,14 +130,16 @@ impl<'a> Future for ReadFuture<'a> {
 pub struct WriteFuture<'a> {
     file_descriptor: i32,
     buffer: &'a [u8],
+    reactor: ReactorHandle,
     registered: bool,
 }
 
 impl<'a> WriteFuture<'a> {
-    pub fn new(file_descriptor: i32, buffer: &'a [u8]) -> Self {
+    pub fn new(file_descriptor: i32, buffer: &'a [u8], reactor: ReactorHandle) -> Self {
         Self {
             file_descriptor,
             buffer,
+            reactor,
             registered: false,
         }
     }
@@ -161,9 +167,9 @@ impl<'a> Future for WriteFuture<'a> {
 
         if error == EAGAIN || error == EWOULDBLOCK {
             if !this.registered {
-                let _ = with_current_reactor(|r| {
-                    r.register_write(this.file_descriptor, cx.waker().clone());
-                });
+                this.reactor
+                    .borrow_mut()
+                    .register_write(this.file_descriptor, cx.waker().clone());
                 this.registered = true;
             }
 

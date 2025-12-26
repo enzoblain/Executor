@@ -5,14 +5,14 @@
 
 use super::queue::TaskQueue;
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Executes tasks from a shared task queue.
 ///
 /// The executor continuously drains the task queue, polling each task until completion.
 /// It is the core mechanism that allows concurrent execution of multiple futures.
 pub(crate) struct Executor {
-    pub(crate) queue: Arc<TaskQueue>,
+    pub(crate) queue: Rc<TaskQueue>,
 }
 
 impl Executor {
@@ -20,7 +20,7 @@ impl Executor {
     ///
     /// # Arguments
     /// * `queue` - The task queue that the executor will drain
-    pub fn new(queue: Arc<TaskQueue>) -> Self {
+    pub fn new(queue: Rc<TaskQueue>) -> Self {
         Self { queue }
     }
 

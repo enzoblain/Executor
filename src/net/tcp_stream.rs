@@ -21,6 +21,7 @@
 //! }
 //! ```
 use crate::net::future::{ReadFuture, WriteFuture};
+use crate::reactor::core::ReactorHandle;
 
 use libc::close;
 use std::io;
@@ -49,6 +50,7 @@ use std::io;
 /// ```
 pub struct TcpStream {
     file_descriptor: i32,
+    reactor: ReactorHandle,
 }
 
 impl TcpStream {
@@ -56,12 +58,16 @@ impl TcpStream {
     ///
     /// # Arguments
     /// * `file_descriptor` - An open socket file descriptor (must be non-blocking)
+    /// * `reactor` - A handle to the reactor for managing I/O events
     ///
     /// # Safety
     ///
     /// The caller must ensure the file descriptor is valid and represents an open socket.
-    pub fn new(file_descriptor: i32) -> Self {
-        Self { file_descriptor }
+    pub fn new(file_descriptor: i32, reactor: ReactorHandle) -> Self {
+        Self {
+            file_descriptor,
+            reactor,
+        }
     }
 
     /// Reads data from the stream.
@@ -82,7 +88,7 @@ impl TcpStream {
     /// This may return fewer bytes than the buffer size. See [`Self::write_all`]
     /// for a method that retries until all data is written.
     pub fn read<'a>(&'a self, buffer: &'a mut [u8]) -> ReadFuture<'a> {
-        ReadFuture::new(self.file_descriptor, buffer)
+        ReadFuture::new(self.file_descriptor, buffer, self.reactor.clone())
     }
 
     /// Writes data to the stream.
@@ -102,7 +108,7 @@ impl TcpStream {
     /// This may write fewer bytes than the buffer size. Use [`Self::write_all`]
     /// to ensure all data is written.
     pub fn write<'a>(&'a self, buffer: &'a [u8]) -> WriteFuture<'a> {
-        WriteFuture::new(self.file_descriptor, buffer)
+        WriteFuture::new(self.file_descriptor, buffer, self.reactor.clone())
     }
 
     /// Writes all data to the stream, retrying until complete.
