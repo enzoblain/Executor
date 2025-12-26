@@ -99,18 +99,16 @@ fn folder_exists_api() {
     let base = unique_temp_base();
     let base_str = base.to_string_lossy().into_owned();
 
-    let mut created_path = String::new();
-
-    rt.block_on(async move {
-        let f = Folder::create(&base_str).await.expect("create");
+    let base_for_async = base_str.clone();
+    let folder: Folder = rt.block_on(async move {
+        let f = Folder::create(&base_for_async).await.expect("create");
         assert!(f.exists());
 
-        created_path = f.path().to_string();
+        f
     });
 
     // After deletion, exists() should be false
     fs::remove_dir(&base_str).expect("cleanup");
 
-    let f = Folder { path: created_path };
-    assert!(!f.exists());
+    assert!(!folder.exists());
 }
