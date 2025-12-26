@@ -1,22 +1,15 @@
-use std::{io, task::Waker};
+use std::io;
 
 use crate::net::future::{ReadFuture, WriteFuture};
 use libc::close;
 
 pub struct TcpStream {
     file_descriptor: i32,
-
-    read_waker: Option<Waker>,
-    write_waker: Option<Waker>,
 }
 
 impl TcpStream {
     pub fn new(file_descriptor: i32) -> Self {
-        Self {
-            file_descriptor,
-            read_waker: None,
-            write_waker: None,
-        }
+        Self { file_descriptor }
     }
     pub fn read<'a>(&'a self, buf: &'a mut [u8]) -> ReadFuture<'a> {
         ReadFuture::new(self.file_descriptor, buf)
