@@ -14,7 +14,8 @@ thread_local! {
     /// When a runtime is entered via `block_on`, its task queue is stored here,
     /// allowing `Task::spawn()` to work without an explicit runtime reference.
     /// This enables global task spawning similar to tokio::spawn().
-    pub(crate) static CURRENT_QUEUE: RefCell<Option<Arc<TaskQueue>>> = const { RefCell::new(None) };
+    pub(crate) static CURRENT_QUEUE: RefCell<Option<Arc<TaskQueue>>> =
+        const { RefCell::new(None) };
 }
 
 /// Enters a runtime context with the given task queue.
@@ -36,6 +37,7 @@ where
         let previous = current.borrow_mut().replace(queue.clone());
         let result = f();
         *current.borrow_mut() = previous;
+
         result
     })
 }

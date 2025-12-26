@@ -1,10 +1,19 @@
-use libc::{AF_INET, in_addr, sockaddr_in};
+//! Socket address parsing and conversion utilities.
+
+use libc::{in_addr, sockaddr_in, AF_INET};
 use std::io;
 use std::mem;
 use std::net::SocketAddr;
 
-pub(crate) fn parse_sockaddr(addr: &str) -> io::Result<sockaddr_in> {
-    let (ip_str, port_str) = addr
+/// Parses a socket address string (format: "ip:port") into a sockaddr_in.
+///
+/// # Arguments
+/// * `address` - A string in the format "192.168.1.1:8080"
+///
+/// # Returns
+/// A sockaddr_in structure or an I/O error if parsing fails
+pub(crate) fn parse_sockaddr(address: &str) -> io::Result<sockaddr_in> {
+    let (ip_str, port_str) = address
         .rsplit_once(':')
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid address"))?;
 
@@ -22,8 +31,8 @@ pub(crate) fn parse_sockaddr(addr: &str) -> io::Result<sockaddr_in> {
         ));
     }
 
-    for (i, part) in parts.iter().enumerate() {
-        octets[i] = part
+    for (index, part) in parts.iter().enumerate() {
+        octets[index] = part
             .parse::<u8>()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid IPv4 octet"))?;
     }
@@ -44,14 +53,16 @@ pub(crate) fn parse_sockaddr(addr: &str) -> io::Result<sockaddr_in> {
     })
 }
 
-pub(crate) fn sockaddr_to_socketaddr(addr: &sockaddr_in) -> SocketAddr {
-    let ip_u32 = u32::from_be(addr.sin_addr.s_addr);
+/// Converts a sockaddr_in to a SocketAddr.
+pub(crate) fn sockaddr_to_socketaddr(address: &sockaddr_in) -> SocketAddr {
+    let ip_u32 = u32::from_be(address.sin_addr.s_addr);
     let octets = [
         (ip_u32 >> 24) as u8,
         (ip_u32 >> 16) as u8,
         (ip_u32 >> 8) as u8,
         ip_u32 as u8,
     ];
-    let port = u16::from_be(addr.sin_port);
+    let port = u16::from_be(address.sin_port);
+
     SocketAddr::from((octets, port))
 }

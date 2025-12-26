@@ -1,18 +1,77 @@
-use crate::net::{future::AcceptFuture, tcp_stream::TcpStream};
-
-use super::utils::{parse_sockaddr, sockaddr_to_socketaddr};
-
+//! TCP listener for accepting incoming connections.
+//!
+//! Provides a non-blocking [`TcpListener`] for server applications.
+//!
+//! # Usage
+//!
+//! ```ignore
+//! use reactor::net::tcp_listener::TcpListener;
+//! use std::time::Duration;
+//!
+//! async fn server() {
+//!     let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+//!     println!("Listening on {}", listener.local_addr().unwrap());
+//!
+//!     loop {
+//!         let (stream, peer_addr) = listener.accept().await.unwrap();
+//!         println!("New connection from {}", peer_addr);
+//!     }
+//! }
+//! ```
+use crate::net::future::AcceptFuture;
+use crate::net::tcp_stream::TcpStream;
+use crate::net::utils::sockaddr_to_socketaddr;
 use crate::reactor::event::Event;
-use libc::{AF_INET, SOCK_STREAM, bind, close, getsockname, listen, sockaddr, sockaddr_in, socket};
-use std::{io, mem, net::SocketAddr};
 
+use libc::{AF_INET, SOCK_STREAM, bind, close, getsockname, listen, sockaddr, sockaddr_in, socket};
+use std::io;
+use std::mem;
+use std::net::SocketAddr;
+
+/// A TCP listener that accepts incoming connections.
+///
+/// `TcpListener` binds to an address and waits for incoming connections. Each
+/// call to [`Self::accept`] returns a new [`TcpStream`] and the peer's address.
+///
+/// # Non-blocking
+///
+/// All operations are non-blocking. If no connection is available, the listener yields
+/// control to other tasks via the reactor.
+///
+/// # Example
+///
+/// ```ignore
+/// let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+/// loop {
+///     let (stream, addr) = listener.accept().await.unwrap();
+///     println!("Connection from {}", addr);
+/// }
+/// ```
 pub struct TcpListener {
     file_descriptor: i32,
 }
 
 impl TcpListener {
-    pub async fn bind(addr: &str) -> io::Result<Self> {
-        let addr = parse_sockaddr(addr)?;
+    /// Binds a listener to the given address.
+    ///
+    /// This method performs the following:
+    /// 1. Creates a new socket
+    /// 2. Sets it to non-blocking mode
+    /// 3. Binds to the specified address
+    /// 4. Starts listening with a backlog of 128
+    ///
+    /// # Arguments
+    /// * `address` - Address to bind to, format: \"ip:port\" (e.g., \"127.0.0.1:8080\")
+    ///
+    /// # Returns
+    /// A [`TcpListener`] on success, or an I/O error
+    ///
+    /// # Example
+    /// ```ignore
+    /// let listener = TcpListener::bind("0.0.0.0:8080").await?;
+    /// ```
+    pub async fn bind(address: &str) -> io::Result<Self> {
+        let addr = crate::net::utils::parse_sockaddr(address)?;
         let file_descriptor = unsafe { socket(AF_INET, SOCK_STREAM, 0) };
 
         Event::set_nonblocking(file_descriptor);
@@ -37,24 +96,54 @@ impl TcpListener {
         Ok(Self { file_descriptor })
     }
 
+    /// Accepts a new incoming connection.
+    ///
+    /// Waits for a client to connect to this listener. When a connection is available,
+    /// returns a [`TcpStream`] for the new connection and the peer's address.
+    ///
+    /// # Returns
+    /// A tuple of:
+    /// - [`TcpStream`]: The accepted connection
+    /// - [`SocketAddr`]: The peer's address
+    ///
+    /// Or an I/O error if the operation fails.
+    ///
+    /// # Example
+    /// ```text
+    /// let (stream, addr) = listener.accept().await?;
+    /// println!("Accepted connection from {}", addr);
+    /// ```
     pub async fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        let (file_descriptor, addr) = AcceptFuture::new(self.file_descriptor).await?;
-        Ok((TcpStream::new(file_descriptor), addr))
+        let (file_descriptor, address) = AcceptFuture::new(self.file_descriptor).await?;
+
+        Ok((TcpStream::new(file_descriptor), address))
     }
 
+    /// Returns the local address this listener is bound to.
+    ///
+    /// # Returns
+    /// The [`SocketAddr`] that this listener is bound to
+    ///
+    /// # Example
+    /// ```text
+    /// let listener = TcpListener::bind("127.0.0.1:0").await?;
+    /// println!("Listening on {}", listener.local_addr()?);
+    /// ```
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         let mut addr: sockaddr_in = unsafe { mem::zeroed() };
-        let mut len = mem::size_of::<sockaddr_in>() as u32;
-        let res = unsafe {
+        let mut length = mem::size_of::<sockaddr_in>() as u32;
+        let result = unsafe {
             getsockname(
                 self.file_descriptor,
                 &mut addr as *mut _ as *mut sockaddr,
-                &mut len,
+                &mut length,
             )
         };
-        if res < 0 {
+
+        if result < 0 {
             return Err(io::Error::last_os_error());
         }
+
         Ok(sockaddr_to_socketaddr(&addr))
     }
 }

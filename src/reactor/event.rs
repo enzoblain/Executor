@@ -1,3 +1,8 @@
+//! kqueue event wrapper and operations.
+//!
+//! Wraps libc kevent structures and provides convenient methods for registering
+//! and waiting for I/O and timer events.
+
 use libc::{EV_ADD, EV_DELETE, EV_ENABLE, F_GETFL, F_SETFL, O_NONBLOCK, fcntl, kevent};
 use std::ptr;
 

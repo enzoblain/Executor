@@ -1,18 +1,25 @@
+//! Async read and write primitives.
+//!
+//! Provides `AsyncRead` and `AsyncWrite` futures that work with the reactor
+//! to enable non-blocking I/O operations.
+
 use crate::reactor::core::with_current_reactor;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+/// A future that completes when a file descriptor is readable.
 pub struct AsyncRead {
-    fd: i32,
+    file_descriptor: i32,
     registered: bool,
 }
 
 impl AsyncRead {
-    pub fn new(fd: i32) -> Self {
+    /// Creates a new AsyncRead for the given file descriptor.
+    pub fn new(file_descriptor: i32) -> Self {
         Self {
-            fd,
+            file_descriptor,
             registered: false,
         }
     }
@@ -24,26 +31,28 @@ impl Future for AsyncRead {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if !self.registered {
             let _ = with_current_reactor(|r| {
-                r.register_read(self.fd, cx.waker().clone());
+                r.register_read(self.file_descriptor, cx.waker().clone());
             });
             self.registered = true;
+
             return Poll::Pending;
         }
 
-        // On subsequent polls (after wake), consider ready
         Poll::Ready(Ok(()))
     }
 }
 
+/// A future that completes when a file descriptor is writable.
 pub struct AsyncWrite {
-    fd: i32,
+    file_descriptor: i32,
     registered: bool,
 }
 
 impl AsyncWrite {
-    pub fn new(fd: i32) -> Self {
+    /// Creates a new AsyncWrite for the given file descriptor.
+    pub fn new(file_descriptor: i32) -> Self {
         Self {
-            fd,
+            file_descriptor,
             registered: false,
         }
     }
@@ -55,13 +64,13 @@ impl Future for AsyncWrite {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if !self.registered {
             let _ = with_current_reactor(|r| {
-                r.register_write(self.fd, cx.waker().clone());
+                r.register_write(self.file_descriptor, cx.waker().clone());
             });
             self.registered = true;
+
             return Poll::Pending;
         }
 
-        // On subsequent polls (after wake), consider ready
         Poll::Ready(Ok(()))
     }
 }

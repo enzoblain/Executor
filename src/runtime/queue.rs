@@ -20,8 +20,6 @@ pub(crate) struct TaskQueue {
 
 impl TaskQueue {
     /// Creates a new empty task queue.
-    ///
-    /// Initializes an empty VecDeque wrapped in a Mutex for thread-safe access.
     pub(crate) fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
@@ -31,8 +29,7 @@ impl TaskQueue {
 
     /// Enqueues a task to be executed.
     ///
-    /// Pushes the task to the back of the queue using FIFO (first-in-first-out) ordering.
-    /// The task will be executed by the executor in the order it was added.
+    /// Pushes the task to the back of the queue using FIFO ordering.
     ///
     /// # Arguments
     /// * `task` - The task to enqueue
@@ -42,9 +39,6 @@ impl TaskQueue {
 
     /// Dequeues and returns the next ready task.
     ///
-    /// Removes and returns the task at the front of the queue if available.
-    /// Returns None if the queue is empty.
-    ///
     /// # Returns
     /// Some(task) if a task is available, None if the queue is empty
     pub(crate) fn pop(&self) -> Option<Arc<Task>> {
@@ -52,9 +46,6 @@ impl TaskQueue {
     }
 
     /// Checks if the task queue is empty.
-    ///
-    /// # Returns
-    /// true if no tasks are queued, false otherwise
     pub(crate) fn is_empty(&self) -> bool {
         self.queue.lock().unwrap().is_empty()
     }

@@ -1,3 +1,7 @@
+//! Sleep futures for asynchronous delays.
+//!
+//! Provides `Sleep` future that completes after a specified duration using reactor timers.
+
 use crate::reactor::core::with_current_reactor;
 use std::future::Future;
 use std::pin::Pin;
@@ -40,6 +44,7 @@ impl Future for Sleep {
             }
 
             self.registered = true;
+
             return Poll::Pending;
         }
 
@@ -47,6 +52,7 @@ impl Future for Sleep {
     }
 }
 
+/// Creates a sleep future for the given duration.
 pub fn sleep(duration: Duration) -> Sleep {
     Sleep::new(duration)
 }

@@ -12,8 +12,14 @@ use std::task::Waker;
 use std::time::Duration;
 
 thread_local! {
-    /// Thread-local pointer to the current Runtime's reactor
-    pub(crate) static CURRENT_REACTOR_PTR: RefCell<*mut Reactor> = const { RefCell::new(ptr::null_mut()) };
+    /// Thread-local pointer to the current Runtime's reactor.
+    ///
+    /// This allows futures to access the reactor for registering I/O and timer events
+    /// without requiring an explicit reactor reference to be passed through the call stack.
+    /// It's set when entering a runtime context via [`set_current_reactor`] and cleared
+    /// when exiting.
+    pub(crate) static CURRENT_REACTOR_PTR: RefCell<*mut Reactor> =
+        const { RefCell::new(ptr::null_mut()) };
 }
 
 pub(crate) fn set_current_reactor(r: &mut Reactor) {
@@ -22,6 +28,16 @@ pub(crate) fn set_current_reactor(r: &mut Reactor) {
     });
 }
 
+/// Executes a closure with access to the current reactor.
+///
+/// This is the safe way to access the reactor. It returns `None` if called outside
+/// of a runtime context (when no reactor has been set).
+///
+/// # Arguments
+/// * `f` - A closure that takes a mutable reference to the reactor
+///
+/// # Returns
+/// `Some(R)` with the closure's return value if a reactor exists, `None` otherwise
 pub(crate) fn with_current_reactor<R>(f: impl FnOnce(&mut Reactor) -> R) -> Option<R> {
     CURRENT_REACTOR_PTR.with(|cell| {
         let ptr = *cell.borrow();

@@ -1,3 +1,5 @@
+//! Socket acceptance utilities for kqueue.
+
 use crate::reactor::core::Entry;
 use crate::reactor::event::Event;
 use crate::reactor::io::Connexion;
@@ -15,12 +17,12 @@ pub(crate) fn accept_client(
         unsafe { accept(listener_file_descriptor, ptr::null_mut(), ptr::null_mut()) };
 
     if client_file_descriptor < 0 {
-        let err = errno();
-        if err == EAGAIN || err == EWOULDBLOCK {
+        let error = errno();
+        if error == EAGAIN || error == EWOULDBLOCK {
             return;
         }
 
-        if err == EMFILE || err == ENFILE {
+        if error == EMFILE || error == ENFILE {
             return;
         }
 

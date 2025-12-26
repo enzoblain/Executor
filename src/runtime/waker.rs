@@ -19,8 +19,6 @@ pub struct TaskWaker {
 impl TaskWaker {
     /// Creates a new waker for the given task.
     ///
-    /// Wraps the task in an Arc for thread-safe reference counting.
-    ///
     /// # Arguments
     /// * `task` - The task to wake when notified
     ///
@@ -31,15 +29,11 @@ impl TaskWaker {
     }
 
     /// Wakes the task by re-enqueueing it.
-    ///
-    /// Pushes the task back to the queue so it can be polled again by the executor.
     fn wake(self: &Arc<Self>) {
         self.task.queue.push(self.task.clone());
     }
 
     /// Raw waker clone function for RawWakerVTable.
-    ///
-    /// Converts the raw pointer back to an Arc, clones it, and returns a new RawWaker.
     fn clone_raw(ptr: *const ()) -> RawWaker {
         unsafe {
             let arc = Arc::<TaskWaker>::from_raw(ptr as *const TaskWaker);
@@ -50,8 +44,6 @@ impl TaskWaker {
     }
 
     /// Raw waker wake function for RawWakerVTable.
-    ///
-    /// Converts the raw pointer to an Arc and calls the wake method.
     fn wake_raw(ptr: *const ()) {
         unsafe {
             let arc = Arc::<TaskWaker>::from_raw(ptr as *const TaskWaker);
@@ -60,8 +52,6 @@ impl TaskWaker {
     }
 
     /// Raw waker wake-by-reference function for RawWakerVTable.
-    ///
-    /// Similar to wake_raw but doesn't consume the Arc ownership.
     fn wake_by_ref_raw(ptr: *const ()) {
         unsafe {
             let arc = Arc::<TaskWaker>::from_raw(ptr as *const TaskWaker);
@@ -71,8 +61,6 @@ impl TaskWaker {
     }
 
     /// Raw waker drop function for RawWakerVTable.
-    ///
-    /// Properly drops the Arc when the waker is destroyed.
     fn drop_raw(ptr: *const ()) {
         unsafe {
             Arc::<TaskWaker>::from_raw(ptr as *const TaskWaker);
@@ -98,8 +86,8 @@ impl TaskWaker {
 ///
 /// # Returns
 /// A Waker that will re-queue the task when called
-pub fn make_waker(task: Arc<Task>) -> Waker {
-    let w = TaskWaker::new(task);
-    let raw = RawWaker::new(Arc::into_raw(w) as *const (), &TaskWaker::VTABLE);
+pub(crate) fn make_waker(task: Arc<Task>) -> Waker {
+    let task_waker = TaskWaker::new(task);
+    let raw = RawWaker::new(Arc::into_raw(task_waker) as *const (), &TaskWaker::VTABLE);
     unsafe { Waker::from_raw(raw) }
 }

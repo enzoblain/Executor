@@ -24,7 +24,7 @@ impl RuntimeBuilder {
     /// ```ignore
     /// let builder = RuntimeBuilder::new();
     /// ```
-    #[allow(clippy::new_without_default)] // Delete when runtime update
+    #[allow(clippy::new_without_default)] // TODO: Enable when configuration options are added
     pub fn new() -> Self {
         Self {}
     }

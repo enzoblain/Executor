@@ -18,8 +18,6 @@ pub(crate) struct Executor {
 impl Executor {
     /// Creates a new executor with the given task queue.
     ///
-    /// Initializes the executor that will process tasks from the provided queue.
-    ///
     /// # Arguments
     /// * `queue` - The task queue that the executor will drain
     pub fn new(queue: Arc<TaskQueue>) -> Self {

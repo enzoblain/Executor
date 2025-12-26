@@ -1,4 +1,7 @@
 //! Runtime subsystem modules.
+//!
+//! Provides the core runtime infrastructure including task scheduling, execution,
+//! and context management for asynchronous task execution.
 
 pub(crate) mod context;
 mod core;

@@ -1,8 +1,10 @@
+//! Async TCP futures for accepting connections and reading/writing data.
+
 use crate::net::utils::sockaddr_to_socketaddr;
 use crate::reactor::core::with_current_reactor;
 use crate::reactor::event::Event;
 
-use libc::{EAGAIN, EWOULDBLOCK, accept, read, sockaddr, sockaddr_in, socklen_t, write};
+use libc::{accept, read, sockaddr, sockaddr_in, socklen_t, write, EAGAIN, EWOULDBLOCK};
 use std::future::Future;
 use std::io;
 use std::mem;
@@ -10,15 +12,16 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+/// A future that accepts a new client connection.
 pub struct AcceptFuture {
-    listen_fd: i32,
+    listen_file_descriptor: i32,
     registered: bool,
 }
 
 impl AcceptFuture {
-    pub fn new(listen_fd: i32) -> Self {
+    pub fn new(listen_file_descriptor: i32) -> Self {
         Self {
-            listen_fd,
+            listen_file_descriptor,
             registered: false,
         }
     }
@@ -33,7 +36,7 @@ impl Future for AcceptFuture {
 
         let client_fd = unsafe {
             accept(
-                self.listen_fd,
+                self.listen_file_descriptor,
                 &mut addr as *mut _ as *mut sockaddr,
                 &mut addr_len,
             )
@@ -42,18 +45,20 @@ impl Future for AcceptFuture {
         if client_fd >= 0 {
             Event::set_nonblocking(client_fd);
             let socket_addr = sockaddr_to_socketaddr(&addr);
+
             return Poll::Ready(Ok((client_fd, socket_addr)));
         }
 
-        let err = unsafe { *libc::__error() };
+        let error = unsafe { *libc::__error() };
 
-        if err == EAGAIN || err == EWOULDBLOCK {
+        if error == EAGAIN || error == EWOULDBLOCK {
             if !self.registered {
                 let _ = with_current_reactor(|r| {
-                    r.register_read(self.listen_fd, cx.waker().clone());
+                    r.register_read(self.listen_file_descriptor, cx.waker().clone());
                 });
                 self.registered = true;
             }
+
             return Poll::Pending;
         }
 
@@ -61,17 +66,18 @@ impl Future for AcceptFuture {
     }
 }
 
+/// A future that reads data from a file descriptor.
 pub struct ReadFuture<'a> {
-    fd: i32,
-    buf: &'a mut [u8],
+    file_descriptor: i32,
+    buffer: &'a mut [u8],
     registered: bool,
 }
 
 impl<'a> ReadFuture<'a> {
-    pub fn new(fd: i32, buf: &'a mut [u8]) -> Self {
+    pub fn new(file_descriptor: i32, buffer: &'a mut [u8]) -> Self {
         Self {
-            fd,
-            buf,
+            file_descriptor,
+            buffer,
             registered: false,
         }
     }
@@ -83,7 +89,7 @@ impl<'a> Future for ReadFuture<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.as_mut().get_unchecked_mut() };
 
-        let res = unsafe { read(this.fd, this.buf.as_mut_ptr() as *mut _, this.buf.len()) };
+        let res = unsafe { read(this.file_descriptor, this.buffer.as_mut_ptr() as *mut _, this.buffer.len()) };
 
         if res > 0 {
             return Poll::Ready(Ok(res as usize));
@@ -93,15 +99,16 @@ impl<'a> Future for ReadFuture<'a> {
             return Poll::Ready(Ok(0));
         }
 
-        let err = unsafe { *libc::__error() };
+        let error = unsafe { *libc::__error() };
 
-        if err == EAGAIN || err == EWOULDBLOCK {
+        if error == EAGAIN || error == EWOULDBLOCK {
             if !this.registered {
                 let _ = with_current_reactor(|r| {
-                    r.register_read(this.fd, cx.waker().clone());
+                    r.register_read(this.file_descriptor, cx.waker().clone());
                 });
                 this.registered = true;
             }
+
             return Poll::Pending;
         }
 
@@ -109,17 +116,18 @@ impl<'a> Future for ReadFuture<'a> {
     }
 }
 
+/// A future that writes data to a file descriptor.
 pub struct WriteFuture<'a> {
-    fd: i32,
-    buf: &'a [u8],
+    file_descriptor: i32,
+    buffer: &'a [u8],
     registered: bool,
 }
 
 impl<'a> WriteFuture<'a> {
-    pub fn new(fd: i32, buf: &'a [u8]) -> Self {
+    pub fn new(file_descriptor: i32, buffer: &'a [u8]) -> Self {
         Self {
-            fd,
-            buf,
+            file_descriptor,
+            buffer,
             registered: false,
         }
     }
@@ -131,21 +139,22 @@ impl<'a> Future for WriteFuture<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.as_mut().get_unchecked_mut() };
 
-        let res = unsafe { write(this.fd, this.buf.as_ptr() as *const _, this.buf.len()) };
+        let res = unsafe { write(this.file_descriptor, this.buffer.as_ptr() as *const _, this.buffer.len()) };
 
         if res >= 0 {
             return Poll::Ready(Ok(res as usize));
         }
 
-        let err = unsafe { *libc::__error() };
+        let error = unsafe { *libc::__error() };
 
-        if err == EAGAIN || err == EWOULDBLOCK {
+        if error == EAGAIN || error == EWOULDBLOCK {
             if !this.registered {
                 let _ = with_current_reactor(|r| {
-                    r.register_write(this.fd, cx.waker().clone());
+                    r.register_write(this.file_descriptor, cx.waker().clone());
                 });
                 this.registered = true;
             }
+
             return Poll::Pending;
         }
 

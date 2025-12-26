@@ -1,3 +1,7 @@
+//! Cooperative task yielding.
+//!
+//! Provides a mechanism for tasks to yield control to other tasks.
+
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -17,8 +21,10 @@ pub async fn yield_now() {
             if !self.0 {
                 self.0 = true;
                 cx.waker().wake_by_ref();
+
                 return Poll::Pending;
             }
+
             Poll::Ready(())
         }
     }

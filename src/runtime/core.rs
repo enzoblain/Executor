@@ -2,6 +2,33 @@
 //!
 //! The runtime coordinates the execution of a main future via `block_on` and handles
 //! spawned background tasks. It uses a task queue and executor to manage concurrent execution.
+//!
+//! # Main Event Loop
+//!
+//! The runtime's `block_on` method implements the main event loop:
+//! 1. Polls the main future
+//! 2. Executes all ready tasks from the queue
+//! 3. Polls for I/O events using the reactor
+//! 4. Blocks on I/O when idle, or continues if more tasks are ready
+//!
+//! # Usage
+//!
+//! ```ignore
+//! let mut rt = Runtime::new();
+//! let result = rt.block_on(async {
+//!     println!("Hello from async");
+//!     42
+//! });
+//! assert_eq!(result, 42);
+//! ```
+//!
+//! # Context Management
+//!
+//! The runtime establishes a thread-local context that allows spawned tasks to use
+//! [`Task::spawn`] without an explicit runtime reference. This enables patterns similar
+//! to `tokio::spawn`.
+//!
+//! [`Task::spawn`]: crate::task::Task::spawn
 
 use crate::reactor::core::{Reactor, set_current_reactor};
 use crate::runtime::{Executor, TaskQueue, enter_context};
@@ -82,42 +109,42 @@ impl Runtime {
     /// assert_eq!(result, 42);
     /// ```
     pub fn block_on<F: Future>(&mut self, fut: F) -> F::Output {
-        // Make the runtime's reactor available to futures on this thread
         set_current_reactor(&mut self.reactor);
 
         enter_context(self.queue.clone(), || {
             let mut fut = Box::pin(fut);
 
-            // Main-future waker that sets a local notification flag on wake.
-            // This avoids blocking on I/O when the main future requests a yield.
             let mut notified = false;
+
             fn clone(ptr: *const ()) -> std::task::RawWaker {
                 std::task::RawWaker::new(ptr, &VTABLE)
             }
+
             fn wake(ptr: *const ()) {
                 unsafe {
                     *(ptr as *mut bool) = true;
                 }
             }
+
             fn wake_by_ref(ptr: *const ()) {
                 unsafe {
                     *(ptr as *mut bool) = true;
                 }
             }
+
             fn drop(_: *const ()) {}
+
             static VTABLE: std::task::RawWakerVTable =
                 std::task::RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+
             let raw = std::task::RawWaker::new(&mut notified as *mut bool as *const (), &VTABLE);
             let w = unsafe { std::task::Waker::from_raw(raw) };
             let mut cx = Context::from_waker(&w);
 
             loop {
-                // Try to make progress on the main future
                 if let Poll::Ready(val) = fut.as_mut().poll(&mut cx) {
-                    // Signal the driver thread to shut down immediately
                     self.queue.shutdown();
 
-                    // Give remaining tasks a brief moment to complete
                     for _ in 0..10 {
                         self.executor.run();
                         if self.queue.is_empty() {
@@ -129,14 +156,11 @@ impl Runtime {
                     return val;
                 }
 
-                // Execute all spawned tasks
                 self.executor.run();
 
-                // Opportunistically poll I/O each tick to deliver wakes promptly
                 self.reactor.poll_events();
                 self.reactor.wake_ready();
 
-                // If the main future requested a wake (yield_now), avoid blocking and poll again.
                 if notified {
                     notified = false;
                     continue;
@@ -146,10 +170,8 @@ impl Runtime {
                     continue;
                 }
 
-                // Otherwise, block on I/O events
                 self.reactor.wait_for_event();
                 self.reactor.handle_events();
-                // Wake all futures that became ready
                 self.reactor.wake_ready();
             }
         })
