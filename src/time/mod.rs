@@ -2,8 +2,8 @@
 //!
 //! This module provides time-related async primitives:
 //!
-//! - [`sleep`] for non-blocking delays
-//! - [`timeout`] for running a future with a deadline
+//! - [`sleep()`] for non-blocking delays
+//! - [`timeout()`] for running a future with a deadline
 //! - [`wrapper::Time`] for measuring elapsed time of async tasks
 //!
 //! # Example: Sleep
@@ -48,7 +48,7 @@
 //!
 //! # Errors
 //!
-//! The [`TimeError`] enum is returned by [`timeout`] when the deadline is exceeded.
+//! The [`TimeError`] enum is returned by [`timeout()`] when the deadline is exceeded.
 //!
 //! ```ignore
 //! use reactor::time::{timeout, sleep, TimeError};
