@@ -1,10 +1,7 @@
-pub mod sleep;
-pub mod timeout;
-pub mod wrapper;
+mod sleep;
+mod timeout;
+mod wrapper;
 
 pub use sleep::sleep;
 pub use timeout::timeout;
-
-pub enum TimeError {
-    TimeOut,
-}
+pub use wrapper::Time;

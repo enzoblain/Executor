@@ -49,11 +49,13 @@ impl Future for Sleep {
         if !self.registered {
             let waker = cx.waker().clone();
             let expired = self.expired.clone();
+
             self.reactor.lock().unwrap().register_timer_with_callback(
                 self.duration,
                 waker,
                 expired,
             );
+
             self.registered = true;
         }
 

@@ -1,11 +1,10 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+use crate::reactor::core::ReactorHandle;
+use crate::runtime::context::current_reactor_io;
 
-use crate::{ReactorHandle, runtime::context::current_reactor_io, time::TimeError};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 pub fn timeout<F>(duration: Duration, future: F) -> Timeout<F>
 where
@@ -35,20 +34,21 @@ impl<F> Timeout<F> {
 }
 
 impl<F: Future> Future for Timeout<F> {
-    type Output = Result<F::Output, TimeError>;
+    type Output = Result<F::Output, ()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if Instant::now() >= self.deadline {
-            return Poll::Ready(Err(TimeError::TimeOut));
+            return Poll::Ready(Err(()));
         }
 
-        let fut = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.future) };
-        if let Poll::Ready(v) = fut.poll(cx) {
+        let future = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.future) };
+        if let Poll::Ready(v) = future.poll(cx) {
             return Poll::Ready(Ok(v));
         }
 
         if !self.registered {
             let waker = cx.waker().clone();
+
             self.reactor
                 .lock()
                 .unwrap()

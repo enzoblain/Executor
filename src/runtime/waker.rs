@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
-pub struct TaskWaker<T: Send + Sync + 'static> {
+pub(crate) struct TaskWaker<T: Send + Sync + 'static> {
     task: Arc<Task<T>>,
 }
 
 impl<T: Send + Sync + 'static> TaskWaker<T> {
-    pub fn new(task: Arc<Task<T>>) -> Arc<Self> {
+    pub(crate) fn new(task: Arc<Task<T>>) -> Arc<Self> {
         Arc::new(Self { task })
     }
 
@@ -23,6 +23,7 @@ impl<T: Send + Sync + 'static> TaskWaker<T> {
         unsafe {
             let arc = Arc::<TaskWaker<T>>::from_raw(data_ptr as *const TaskWaker<T>);
             let cloned = arc.clone();
+
             std::mem::forget(arc);
 
             RawWaker::new(Arc::into_raw(cloned) as *const (), &Self::VTABLE)

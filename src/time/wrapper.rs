@@ -28,8 +28,10 @@ impl<T: Send + Sync> Future for Time<T> {
         match Pin::new(&mut this.handle).poll(cx) {
             Poll::Ready(result) => {
                 let elapsed = this.start.elapsed();
+
                 Poll::Ready((result, elapsed))
             }
+
             Poll::Pending => Poll::Pending,
         }
     }

@@ -9,5 +9,4 @@ pub mod tools;
 
 pub use core::builder::RuntimeBuilder;
 pub use core::task::{JoinHandle, Task};
-pub use reactor::core::ReactorHandle;
 pub use runtime::yield_now::yield_now;

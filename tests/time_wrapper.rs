@@ -1,5 +1,5 @@
+use cadentis::time::Time;
 use cadentis::time::sleep;
-use cadentis::time::wrapper::Time;
 use cadentis::{RuntimeBuilder, Task};
 use std::time::Duration;
 

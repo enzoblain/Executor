@@ -1,71 +1,75 @@
 use crate::core::task::Runnable;
 use crate::reactor::core::ReactorHandle;
-use crate::runtime::context::Features;
+use crate::runtime::context::{CURRENT_FEATURES, CURRENT_REACTOR, Features};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
-pub struct Injector {
+pub(crate) struct Injector {
     pub(crate) queue: Mutex<VecDeque<Arc<dyn Runnable>>>,
-    pub(crate) cv: Condvar,
+    pub(crate) condvar: Condvar,
+
     active: AtomicUsize,
     shutdown: AtomicBool,
 }
 
 impl Injector {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
-            cv: Condvar::new(),
+            condvar: Condvar::new(),
             active: AtomicUsize::new(0),
             shutdown: AtomicBool::new(false),
         }
     }
 
-    pub fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Release);
-        self.cv.notify_all();
+        self.condvar.notify_all();
     }
 
-    pub fn is_shutdown(&self) -> bool {
+    pub(crate) fn is_shutdown(&self) -> bool {
         self.shutdown.load(Ordering::Acquire)
     }
 
-    pub fn push(&self, task: Arc<dyn Runnable>) {
+    pub(crate) fn push(&self, task: Arc<dyn Runnable>) {
         self.active.fetch_add(1, Ordering::Relaxed);
-        let mut q = self.queue.lock().unwrap();
-        q.push_back(task);
-        self.cv.notify_one();
+
+        let mut queue = self.queue.lock().unwrap();
+        queue.push_back(task);
+
+        self.condvar.notify_one();
     }
 
-    pub fn reschedule(&self, task: Arc<dyn Runnable>) {
-        let mut q = self.queue.lock().unwrap();
-        q.push_back(task);
-        self.cv.notify_one();
+    pub(crate) fn reschedule(&self, task: Arc<dyn Runnable>) {
+        let mut queue = self.queue.lock().unwrap();
+        queue.push_back(task);
+
+        self.condvar.notify_one();
     }
 
-    pub fn pop(&self) -> Option<Arc<dyn Runnable>> {
+    pub(crate) fn pop(&self) -> Option<Arc<dyn Runnable>> {
         self.queue.lock().unwrap().pop_front()
     }
 
-    pub fn task_completed(&self) {
+    pub(crate) fn task_completed(&self) {
         self.active.fetch_sub(1, Ordering::Release);
-        self.cv.notify_all();
+        self.condvar.notify_all();
     }
 
-    pub fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         self.active.load(Ordering::Acquire) == 0
     }
 }
 
-pub struct LocalQueue {
+pub(crate) struct LocalQueue {
     deque: Mutex<VecDeque<Arc<dyn Runnable>>>,
 }
 
 impl LocalQueue {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             deque: Mutex::new(VecDeque::new()),
         }
@@ -75,24 +79,22 @@ impl LocalQueue {
     //     self.deque.lock().unwrap().push_back(task);
     // }
 
-    pub fn pop(&self) -> Option<Arc<dyn Runnable>> {
+    pub(crate) fn pop(&self) -> Option<Arc<dyn Runnable>> {
         self.deque.lock().unwrap().pop_back()
     }
 
-    pub fn steal(&self) -> Option<Arc<dyn Runnable>> {
+    pub(crate) fn steal(&self) -> Option<Arc<dyn Runnable>> {
         self.deque.lock().unwrap().pop_front()
     }
 }
 
-pub struct Worker {
+pub(crate) struct Worker {
     pub(crate) id: usize,
     pub(crate) locals: Arc<Vec<LocalQueue>>,
     pub(crate) injector: Arc<Injector>,
     pub(crate) reactor: ReactorHandle,
     pub(crate) features: Features,
 }
-
-use crate::runtime::context::{CURRENT_FEATURES, CURRENT_REACTOR};
 
 impl Worker {
     pub fn run(&self) {
@@ -118,12 +120,13 @@ impl Worker {
             } else if let Some(task) = self.try_steal() {
                 task.poll();
             } else {
-                let q = self.injector.queue.lock().unwrap();
-                if q.is_empty() && !self.injector.is_shutdown() {
+                let queue = self.injector.queue.lock().unwrap();
+
+                if queue.is_empty() && !self.injector.is_shutdown() {
                     let _ = self
                         .injector
-                        .cv
-                        .wait_timeout(q, std::time::Duration::from_millis(10));
+                        .condvar
+                        .wait_timeout(queue, std::time::Duration::from_millis(10));
                 }
             }
         }
